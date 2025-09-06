@@ -13,29 +13,48 @@ import tempfile
 import zipfile
 from pathlib import Path
 from datetime import datetime, timezone
+import subprocess
 
 import whisper
 from pyannote.audio import Pipeline
 
 
 def extract_zip(zip_path, extract_to):
-    """Extract all mp3 files from a zip archive into a temporary directory."""
+    """Extract all mp3/mp4 files from a zip archive into a temporary directory."""
     with zipfile.ZipFile(zip_path, "r") as z:
         z.extractall(extract_to)
-    return [str(p) for p in Path(extract_to).rglob("*.mp3")]
+    return [
+        str(p)
+        for p in Path(extract_to).rglob("*")
+        if p.suffix.lower() in (".mp3", ".mp4")
+    ]
 
 
-def transcribe_with_whisper(mp3_file, model):
-    """Transcribe a single mp3 file using Whisper (local). Returns structured segments."""
-    print(f"  ▶ Transcribing {mp3_file} with Whisper...")
-    result = model.transcribe(mp3_file, verbose=False)
+def convert_to_wav(input_file, tmpdir):
+    """Convert mp3/mp4 to wav using ffmpeg (for pyannote compatibility)."""
+    output_file = os.path.join(
+        tmpdir, os.path.splitext(os.path.basename(input_file))[0] + ".wav"
+    )
+    subprocess.run(
+        ["ffmpeg", "-y", "-i", input_file, "-ar", "16000", "-ac", "1", output_file],
+        check=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    return output_file
+
+
+def transcribe_with_whisper(audio_file, model):
+    """Transcribe audio file using Whisper (local). Returns structured segments."""
+    print(f"  ▶ Transcribing {audio_file} with Whisper...")
+    result = model.transcribe(audio_file, verbose=False)
     return result.get("segments", [])
 
 
-def diarize_with_pyannote(mp3_file, diarization_pipeline):
+def diarize_with_pyannote(audio_file, diarization_pipeline):
     """Run speaker diarization on audio file. Returns speaker segments."""
-    print(f"  ▶ Running diarization on {mp3_file}...")
-    diarization = diarization_pipeline(mp3_file)
+    print(f"  ▶ Running diarization on {audio_file}...")
+    diarization = diarization_pipeline(audio_file)
     speaker_segments = []
     for turn, _, speaker in diarization.itertracks(yield_label=True):
         speaker_segments.append(
@@ -114,29 +133,35 @@ def write_markdown(jsonl_records, md_path, split_md=False):
         print(f"✅ Combined Markdown transcript saved to {md_path}")
 
 
-def process_files(mp3_files, whisper_model, diarization_pipeline, out_path, split_md):
-    """Process and transcribe a list of mp3 files, writing JSONL + Markdown output."""
-    if not mp3_files:
-        print("No MP3 files found.")
+def process_files(files, whisper_model, diarization_pipeline, out_path, split_md):
+    """Process and transcribe a list of mp3/mp4 files, writing JSONL + Markdown output."""
+    if not files:
+        print("No media files found.")
         return
 
     records = []
-    with open(out_path, "w", encoding="utf-8") as out_f:
-        for mp3_file in mp3_files:
+    with open(out_path, "w", encoding="utf-8") as out_f, tempfile.TemporaryDirectory() as tmpdir:
+        for input_file in files:
             try:
-                print(f"Processing {mp3_file}...")
-                transcript_segments = transcribe_with_whisper(mp3_file, whisper_model)
-                speaker_segments = diarize_with_pyannote(mp3_file, diarization_pipeline)
+                print(f"Processing {input_file}...")
+                audio_file = (
+                    convert_to_wav(input_file, tmpdir)
+                    if Path(input_file).suffix.lower() == ".mp4"
+                    else input_file
+                )
+
+                transcript_segments = transcribe_with_whisper(audio_file, whisper_model)
+                speaker_segments = diarize_with_pyannote(audio_file, diarization_pipeline)
                 conversation = align_transcription_with_diarization(
                     transcript_segments, speaker_segments
                 )
 
-                record = {"file": os.path.basename(mp3_file), "conversation": conversation}
+                record = {"file": os.path.basename(input_file), "conversation": conversation}
                 records.append(record)
                 out_f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
             except Exception as e:
-                print(f"❌ Error processing {mp3_file}: {e}")
+                print(f"❌ Error processing {input_file}: {e}")
 
     md_path = os.path.splitext(out_path)[0] + ".md"
     write_markdown(records, md_path, split_md)
@@ -145,30 +170,27 @@ def process_files(mp3_files, whisper_model, diarization_pipeline, out_path, spli
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Transcribe MP3(s) into JSONL + Markdown with Whisper + Pyannote diarization."
+        description="Transcribe MP3/MP4 into JSONL + Markdown with Whisper + Pyannote diarization."
     )
-    parser.add_argument("--zip", help="Path to a ZIP file containing MP3s")
+    parser.add_argument("--zip", help="Path to a ZIP file containing MP3/MP4s")
     parser.add_argument("--mp3", help="Path to a single MP3 file")
-    parser.add_argument(
-        "--out", default="transcriptions.jsonl", help="Output JSONL file"
-    )
+    parser.add_argument("--mp4", help="Path to a single MP4 file")
+    parser.add_argument("--out", default="transcriptions.jsonl", help="Output JSONL file")
     parser.add_argument(
         "--whisper-model",
         default="base",
         help="Whisper model size (tiny, base, small, medium, large)",
     )
-    parser.add_argument(
-        "--pyannote-token", help="HuggingFace access token for pyannote models"
-    )
+    parser.add_argument("--pyannote-token", help="HuggingFace access token for pyannote models")
     parser.add_argument(
         "--split-md",
         action="store_true",
-        help="Save one Markdown file per audio file instead of a combined one",
+        help="Save one Markdown file per media file instead of a combined one",
     )
     args = parser.parse_args()
 
-    if not args.zip and not args.mp3:
-        parser.error("You must provide either --zip or --mp3")
+    if not args.zip and not args.mp3 and not args.mp4:
+        parser.error("You must provide either --zip, --mp3, or --mp4")
 
     # Load Whisper model
     print(f"Loading Whisper model: {args.whisper_model} ...")
@@ -184,10 +206,12 @@ def main():
 
     if args.zip:
         with tempfile.TemporaryDirectory() as tmpdir:
-            mp3_files = extract_zip(args.zip, tmpdir)
-            process_files(mp3_files, whisper_model, diarization_pipeline, args.out, args.split_md)
+            files = extract_zip(args.zip, tmpdir)
+            process_files(files, whisper_model, diarization_pipeline, args.out, args.split_md)
     elif args.mp3:
         process_files([args.mp3], whisper_model, diarization_pipeline, args.out, args.split_md)
+    elif args.mp4:
+        process_files([args.mp4], whisper_model, diarization_pipeline, args.out, args.split_md)
 
 
 if __name__ == "__main__":
