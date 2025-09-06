@@ -1,0 +1,194 @@
+#!/usr/bin/env python3
+
+import warnings
+warnings.filterwarnings(
+    "ignore",
+    message=".*torchaudio.*list_audio_backends.*deprecated.*"
+)
+
+import argparse
+import json
+import os
+import tempfile
+import zipfile
+from pathlib import Path
+from datetime import datetime, timezone
+
+import whisper
+from pyannote.audio import Pipeline
+
+
+def extract_zip(zip_path, extract_to):
+    """Extract all mp3 files from a zip archive into a temporary directory."""
+    with zipfile.ZipFile(zip_path, "r") as z:
+        z.extractall(extract_to)
+    return [str(p) for p in Path(extract_to).rglob("*.mp3")]
+
+
+def transcribe_with_whisper(mp3_file, model):
+    """Transcribe a single mp3 file using Whisper (local). Returns structured segments."""
+    print(f"  ▶ Transcribing {mp3_file} with Whisper...")
+    result = model.transcribe(mp3_file, verbose=False)
+    return result.get("segments", [])
+
+
+def diarize_with_pyannote(mp3_file, diarization_pipeline):
+    """Run speaker diarization on audio file. Returns speaker segments."""
+    print(f"  ▶ Running diarization on {mp3_file}...")
+    diarization = diarization_pipeline(mp3_file)
+    speaker_segments = []
+    for turn, _, speaker in diarization.itertracks(yield_label=True):
+        speaker_segments.append(
+            {"start": turn.start, "end": turn.end, "speaker": speaker}
+        )
+    return speaker_segments
+
+
+def align_transcription_with_diarization(transcript_segments, speaker_segments):
+    """Align Whisper transcript segments with diarized speaker segments."""
+    aligned = []
+    for t in transcript_segments:
+        t_start, t_end, text = t["start"], t["end"], t["text"].strip()
+        best_speaker = None
+        best_overlap = 0.0
+
+        for s in speaker_segments:
+            overlap = max(0, min(t_end, s["end"]) - max(t_start, s["start"]))
+            if overlap > best_overlap:
+                best_overlap = overlap
+                best_speaker = s["speaker"]
+
+        aligned.append(
+            {
+                "speaker": best_speaker if best_speaker else "unknown",
+                "start": t_start,
+                "end": t_end,
+                "text": text,
+            }
+        )
+    return merge_adjacent_segments(aligned)
+
+
+def merge_adjacent_segments(segments):
+    """Merge consecutive transcript segments by the same speaker."""
+    if not segments:
+        return []
+    merged = [segments[0]]
+    for seg in segments[1:]:
+        last = merged[-1]
+        if seg["speaker"] == last["speaker"]:
+            last["text"] += " " + seg["text"]
+            last["end"] = seg["end"]
+        else:
+            merged.append(seg)
+    return merged
+
+
+def write_markdown(jsonl_records, md_path, split_md=False):
+    """Write transcripts as Markdown (one file or multiple if split_md=True)."""
+    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+
+    if split_md:
+        for record in jsonl_records:
+            filename = record["file"]
+            conversation = record["conversation"]
+            out_path = os.path.join(
+                os.path.dirname(md_path),
+                f"{os.path.splitext(filename)[0]}.md",
+            )
+            with open(out_path, "w", encoding="utf-8") as out_f:
+                out_f.write(f"# {filename}\n\n")
+                out_f.write(f"## Conversation {timestamp}\n\n")
+                for entry in conversation:
+                    out_f.write(f"{entry['speaker']}: {entry['text']}\n\n")
+            print(f"✅ Markdown transcript saved to {out_path}")
+    else:
+        with open(md_path, "w", encoding="utf-8") as out_f:
+            for record in jsonl_records:
+                filename = record["file"]
+                conversation = record["conversation"]
+                out_f.write(f"# {filename}\n\n")
+                out_f.write(f"## Conversation {timestamp}\n\n")
+                for entry in conversation:
+                    out_f.write(f"{entry['speaker']}: {entry['text']}\n\n")
+        print(f"✅ Combined Markdown transcript saved to {md_path}")
+
+
+def process_files(mp3_files, whisper_model, diarization_pipeline, out_path, split_md):
+    """Process and transcribe a list of mp3 files, writing JSONL + Markdown output."""
+    if not mp3_files:
+        print("No MP3 files found.")
+        return
+
+    records = []
+    with open(out_path, "w", encoding="utf-8") as out_f:
+        for mp3_file in mp3_files:
+            try:
+                print(f"Processing {mp3_file}...")
+                transcript_segments = transcribe_with_whisper(mp3_file, whisper_model)
+                speaker_segments = diarize_with_pyannote(mp3_file, diarization_pipeline)
+                conversation = align_transcription_with_diarization(
+                    transcript_segments, speaker_segments
+                )
+
+                record = {"file": os.path.basename(mp3_file), "conversation": conversation}
+                records.append(record)
+                out_f.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+            except Exception as e:
+                print(f"❌ Error processing {mp3_file}: {e}")
+
+    md_path = os.path.splitext(out_path)[0] + ".md"
+    write_markdown(records, md_path, split_md)
+    print(f"✅ JSONL transcripts saved to {out_path}")
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Transcribe MP3(s) into JSONL + Markdown with Whisper + Pyannote diarization."
+    )
+    parser.add_argument("--zip", help="Path to a ZIP file containing MP3s")
+    parser.add_argument("--mp3", help="Path to a single MP3 file")
+    parser.add_argument(
+        "--out", default="transcriptions.jsonl", help="Output JSONL file"
+    )
+    parser.add_argument(
+        "--whisper-model",
+        default="base",
+        help="Whisper model size (tiny, base, small, medium, large)",
+    )
+    parser.add_argument(
+        "--pyannote-token", help="HuggingFace access token for pyannote models"
+    )
+    parser.add_argument(
+        "--split-md",
+        action="store_true",
+        help="Save one Markdown file per audio file instead of a combined one",
+    )
+    args = parser.parse_args()
+
+    if not args.zip and not args.mp3:
+        parser.error("You must provide either --zip or --mp3")
+
+    # Load Whisper model
+    print(f"Loading Whisper model: {args.whisper_model} ...")
+    whisper_model = whisper.load_model(args.whisper_model)
+
+    # Load Pyannote diarization pipeline
+    if not args.pyannote_token:
+        parser.error("You must provide --pyannote-token (HuggingFace access token)")
+    print("Loading Pyannote diarization pipeline...")
+    diarization_pipeline = Pipeline.from_pretrained(
+        "pyannote/speaker-diarization", use_auth_token=args.pyannote_token
+    )
+
+    if args.zip:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            mp3_files = extract_zip(args.zip, tmpdir)
+            process_files(mp3_files, whisper_model, diarization_pipeline, args.out, args.split_md)
+    elif args.mp3:
+        process_files([args.mp3], whisper_model, diarization_pipeline, args.out, args.split_md)
+
+
+if __name__ == "__main__":
+    main()
