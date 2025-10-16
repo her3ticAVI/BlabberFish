@@ -13,7 +13,7 @@
   <a href="https://x.com/BHinfoSecurity"><img src="https://img.shields.io/github/stars/her3ticAVI/BlabberFish?style=flat-square&color=rgb(255%2C218%2C185)" alt="BlabberFish Stars" /></a>
   
 <p class="align center">
-<h4><code>BlabberFish</code> is a dedicated web server application engineered to simplify and automate the documentation of audio conversations. It takes raw audio files and converts them into structured, readable text transcripts.</h4>
+<h4><code>BlabberFish</code> is a dedicated web server application and CLI tool engineered to simplify and automate the documentation of audio conversations. It takes raw audio files and converts them into structured, readable text transcripts.</h4>
 </p>
 
 <div style="text-align: center;">
