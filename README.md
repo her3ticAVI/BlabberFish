@@ -67,7 +67,7 @@ BlabberFish Example Output
 **SPEAKER_00**: Excellent news. And what about the development team's resource allocation for the next sprint?
 ```
 
-## Installing from Source (DEV Purposes)
+## Installing from Source
 
 The following command should set up the environment required to use BlabberFish. Only Linux is supported at this time.
 
