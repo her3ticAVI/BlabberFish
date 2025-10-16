@@ -5,7 +5,6 @@ warnings.filterwarnings(
     "ignore",
     message=".*torchaudio.*list_audio_backends.*deprecated.*"
 )
-
 import argparse
 import json
 import os
@@ -14,10 +13,12 @@ import zipfile
 from pathlib import Path
 from datetime import datetime, timezone
 import subprocess
-
 import whisper
 from pyannote.audio import Pipeline
+from halo import Halo 
 
+SPINNER_TYPE = "pong"
+SPINNER_COLOR = "red"
 
 def extract_zip(zip_path, extract_to):
     """Extract all mp3/mp4 files from a zip archive into a temporary directory."""
@@ -32,35 +33,68 @@ def extract_zip(zip_path, extract_to):
 
 def convert_to_wav(input_file, tmpdir):
     """Convert mp3/mp4 to wav using ffmpeg (for pyannote compatibility)."""
+    filename = os.path.basename(input_file)
     output_file = os.path.join(
-        tmpdir, os.path.splitext(os.path.basename(input_file))[0] + ".wav"
+        tmpdir, os.path.splitext(filename)[0] + ".wav"
     )
-    subprocess.run(
-        ["ffmpeg", "-y", "-i", input_file, "-ar", "16000", "-ac", "1", output_file],
-        check=True,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-    return output_file
+    
+    spinner = Halo(
+        text=f"Converting {filename} to WAV (16kHz, mono)...", 
+        spinner=SPINNER_TYPE, 
+        color=SPINNER_COLOR
+    ).start()
+    
+    try:
+        subprocess.run(
+            ["ffmpeg", "-y", "-i", input_file, "-ar", "16000", "-ac", "1", output_file],
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        spinner.succeed("Conversion complete.")
+        return output_file
+    except subprocess.CalledProcessError as e:
+        spinner.fail(f"FFmpeg conversion failed for {filename}.")
+        raise e
 
 
 def transcribe_with_whisper(audio_file, model):
     """Transcribe audio file using Whisper (local). Returns structured segments."""
-    print(f"  ▶ Transcribing {os.path.basename(audio_file)} with Whisper...")
-    result = model.transcribe(audio_file, verbose=False) 
-    return result.get("segments", [])
+    spinner = Halo(
+        text=f"Transcribing {os.path.basename(audio_file)} using Whisper...", 
+        spinner=SPINNER_TYPE, 
+        color=SPINNER_COLOR
+    ).start()
+    
+    try:
+        result = model.transcribe(audio_file, verbose=False) 
+        spinner.succeed("Transcription complete.")
+        return result.get("segments", [])
+    except Exception as e:
+        spinner.fail(f"Transcription failed for {os.path.basename(audio_file)}.")
+        raise e
 
 
 def diarize_with_pyannote(audio_file, diarization_pipeline):
     """Run speaker diarization on audio file. Returns speaker segments."""
-    print(f"  ▶ Running diarization on {os.path.basename(audio_file)}...")
-    diarization = diarization_pipeline(audio_file)
-    speaker_segments = []
-    for turn, _, speaker in diarization.itertracks(yield_label=True):
-        speaker_segments.append(
-            {"start": turn.start, "end": turn.end, "speaker": speaker}
-        )
-    return speaker_segments
+    spinner = Halo(
+        text=f"Running speaker diarization on {os.path.basename(audio_file)} using Pyannote...", 
+        spinner=SPINNER_TYPE, 
+        color=SPINNER_COLOR
+    ).start()
+    
+    try:
+        diarization = diarization_pipeline(audio_file)
+        speaker_segments = []
+        for turn, _, speaker in diarization.itertracks(yield_label=True):
+            speaker_segments.append(
+                {"start": turn.start, "end": turn.end, "speaker": speaker}
+            )
+        spinner.succeed("Diarization complete.")
+        return speaker_segments
+    except Exception as e:
+        spinner.fail(f"Diarization failed for {os.path.basename(audio_file)}.")
+        raise e
 
 
 def align_transcription_with_diarization(transcript_segments, speaker_segments):
@@ -122,7 +156,7 @@ def write_markdown(jsonl_records, md_path, split_md=False):
                 out_f.write(f"## Conversation {timestamp}\n\n")
                 for entry in conversation:
                     out_f.write(f"**{entry['speaker']}**: {entry['text']}\n\n")
-            print(f"✅ Markdown transcript saved to {out_path}")
+            print(f"Markdown transcript saved to {out_path}")
     else:
         with open(md_path, "w", encoding="utf-8") as out_f:
             for record in jsonl_records:
@@ -133,7 +167,7 @@ def write_markdown(jsonl_records, md_path, split_md=False):
                 for entry in conversation:
                     out_f.write(f"**{entry['speaker']}**: {entry['text']}\n\n")
                 out_f.write("---\n\n")
-        print(f"✅ Combined Markdown transcript saved to {md_path}")
+        print(f"Combined Markdown transcript saved to {md_path}")
 
 
 def process_files(files, whisper_model, diarization_pipeline, out_path, split_md):
@@ -146,12 +180,11 @@ def process_files(files, whisper_model, diarization_pipeline, out_path, split_md
     with tempfile.TemporaryDirectory() as tmpdir:
         with open(out_path, "w", encoding="utf-8") as out_f:
             for input_file in files:
+                print(f"\nProcessing file: {os.path.basename(input_file)}")
                 try:
-                    print(f"\nProcessing {os.path.basename(input_file)}...")
                     
                     if Path(input_file).suffix.lower() == ".mp4":
                         audio_file = convert_to_wav(input_file, tmpdir)
-                        print(f"  ▶ Converted to WAV: {os.path.basename(audio_file)}")
                     else:
                         audio_file = input_file
 
@@ -166,20 +199,21 @@ def process_files(files, whisper_model, diarization_pipeline, out_path, split_md
                     record = {"file": os.path.basename(input_file), "conversation": conversation}
                     records.append(record)
                     out_f.write(json.dumps(record, ensure_ascii=False) + "\n")
+                    print(f"File processing complete: {os.path.basename(input_file)}")
 
                 except subprocess.CalledProcessError:
-                    print(f"❌ Error: ffmpeg failed to process {os.path.basename(input_file)}. Is ffmpeg installed and accessible?")
+                    print(f"Error: FFmpeg required but failed for {os.path.basename(input_file)}. Check installation.")
                 except Exception as e:
-                    print(f"❌ Error processing {os.path.basename(input_file)}: {e}")
+                    print(f"Error processing {os.path.basename(input_file)}. Details: {e}")
 
     md_path = os.path.splitext(out_path)[0] + ".md"
     write_markdown(records, md_path, split_md)
-    print(f"\n✅ All JSONL transcripts saved to {out_path}")
+    print(f"\nProcess complete. JSONL saved to {out_path}.")
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Transcribe MP3/MP4 into JSONL + Markdown with Whisper + Pyannote diarization."
+        description="Transcribe media files with Whisper and Pyannote diarization."
     )
     parser.add_argument("--zip", help="Path to a ZIP file containing MP3/MP4s")
     parser.add_argument("--mp3", help="Path to a single MP3 file")
@@ -188,46 +222,61 @@ def main():
     parser.add_argument(
         "--whisper-model",
         default="base",
-        help="Whisper model size (tiny, base, small, medium, large). Default is 'base'.",
+        help="Whisper model size (tiny, base, small, medium, large). Default: base.",
     )
     parser.add_argument(
         "--pyannote-token", 
-        help="HuggingFace access token for pyannote models. Required for diarization."
+        help="HuggingFace access token for pyannote models. Required."
     )
     parser.add_argument(
         "--split-md",
         action="store_true",
-        help="Save one Markdown file per media file instead of a combined one",
+        help="Save one Markdown file per media file (default is combined output).",
     )
     args = parser.parse_args()
 
     if not args.zip and not args.mp3 and not args.mp4:
-        parser.error("You must provide either --zip, --mp3, or --mp4")
+        parser.error("Must provide one of: --zip, --mp3, or --mp4.")
     
     if not args.pyannote_token:
-        parser.error("You must provide --pyannote-token (HuggingFace access token). Get one from https://huggingface.co/settings/tokens")
+        parser.error("Must provide --pyannote-token.")
 
-    print(f"Loading Whisper model: {args.whisper_model} ...")
+    model_spinner = Halo(
+        text=f"Loading Whisper model: {args.whisper_model}...", 
+        spinner=SPINNER_TYPE, 
+        color=SPINNER_COLOR
+    ).start()
     try:
         whisper_model = whisper.load_model(args.whisper_model)
+        model_spinner.succeed(f"Whisper model loaded: {args.whisper_model}.")
     except Exception as e:
-        print(f"❌ Error loading Whisper model '{args.whisper_model}': {e}")
+        model_spinner.fail(f"Failed to load Whisper model. Details: {e}")
         return
 
-    print("Loading Pyannote diarization pipeline...")
+    diarization_spinner = Halo(
+        text="Loading Pyannote diarization pipeline...", 
+        spinner=SPINNER_TYPE, 
+        color=SPINNER_COLOR
+    ).start()
     try:
         diarization_pipeline = Pipeline.from_pretrained(
             "pyannote/speaker-diarization", use_auth_token=args.pyannote_token
         )
+        diarization_spinner.succeed("Pyannote pipeline loaded.")
     except Exception as e:
-        print(f"❌ Error loading Pyannote pipeline. Check your --pyannote-token and network connection: {e}")
+        diarization_spinner.fail(f"Failed to load Pyannote pipeline. Check token/network. Details: {e}")
         return
 
     files = []
     if args.zip:
+        zip_spinner = Halo(
+            text=f"Extracting ZIP file {args.zip}...", 
+            spinner=SPINNER_TYPE, 
+            color=SPINNER_COLOR
+        ).start()
         with tempfile.TemporaryDirectory() as tmpdir:
-            print(f"Extracting ZIP file {args.zip}...")
             files = extract_zip(args.zip, tmpdir)
+            zip_spinner.succeed(f"Extracted {len(files)} media file(s).")
             process_files(files, whisper_model, diarization_pipeline, args.out, args.split_md)
     elif args.mp3:
         files = [args.mp3]
