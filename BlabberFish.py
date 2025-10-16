@@ -1,10 +1,6 @@
 #!/usr/bin/env python3
 
 import warnings
-warnings.filterwarnings(
-    "ignore",
-    message=".*torchaudio.*list_audio_backends.*deprecated.*"
-)
 import argparse
 import json
 import os
@@ -15,22 +11,25 @@ from datetime import datetime, timezone
 import subprocess
 import whisper
 from pyannote.audio import Pipeline
-from halo import Halo 
+from halo import Halo
+from zipfile import BadZipFile 
 
 SPINNER_TYPE = "pong"
 SPINNER_COLOR = "red"
 
-# --- Utility Functions ---
 
 def extract_zip(zip_path, extract_to):
     """Extract all mp3/mp4 files from a zip archive into a temporary directory."""
-    with zipfile.ZipFile(zip_path, "r") as z:
-        z.extractall(extract_to)
-    return [
-        str(p)
-        for p in Path(extract_to).rglob("*")
-        if p.suffix.lower() in (".mp3", ".mp4")
-    ]
+    try:
+        with zipfile.ZipFile(zip_path, "r") as z:
+            z.extractall(extract_to)
+        return [
+            str(p)
+            for p in Path(extract_to).rglob("*")
+            if p.suffix.lower() in (".mp3", ".mp4")
+        ]
+    except BadZipFile as e:
+        raise BadZipFile(f"File is not a valid ZIP file or is corrupted: {e}")
 
 
 def convert_to_wav(input_file, tmpdir):
@@ -58,6 +57,9 @@ def convert_to_wav(input_file, tmpdir):
     except subprocess.CalledProcessError as e:
         spinner.fail(f"FFmpeg conversion failed for {filename}.")
         raise e
+    except FileNotFoundError:
+        spinner.fail(f"FFmpeg not found. Please ensure it is installed and in your PATH.")
+        raise
 
 
 def transcribe_with_whisper(audio_file, model):
@@ -69,7 +71,7 @@ def transcribe_with_whisper(audio_file, model):
     ).start()
     
     try:
-        result = model.transcribe(audio_file, verbose=False) 
+        result = model.transcribe(audio_file, verbose=False, fp16=False) 
         spinner.succeed("Transcription complete.")
         return result.get("segments", [])
     except Exception as e:
@@ -145,10 +147,9 @@ def write_single_markdown(record, output_dir="."):
     """Write transcript as a single Markdown file based on the audio filename."""
     filename = record["file"]
     conversation = record["conversation"]
-    # Time formatted per user request: Month DD, YYYY, HH:MM AM/PM MDT, ensuring 'AM' is included when applicable.
+
     timestamp = datetime.now(timezone.utc).astimezone(datetime.now().astimezone().tzinfo).strftime("%B %d, %Y, %I:%M %p %Z")
     
-    # Determine the output path for the Markdown file
     out_path = os.path.join(
         output_dir, 
         f"{os.path.splitext(filename)[0]}.md",
@@ -169,7 +170,6 @@ def process_files(files, whisper_model, diarization_pipeline, out_path_base):
         print("No media files found.")
         return
 
-    # Determine the directory for Markdown output (using the directory of the original --out argument)
     md_output_dir = os.path.dirname(out_path_base) or "."
     
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -177,12 +177,11 @@ def process_files(files, whisper_model, diarization_pipeline, out_path_base):
             print(f"\nProcessing file: {os.path.basename(input_file)}")
             try:
                 
-                # Check file extension and convert to WAV if necessary
                 if Path(input_file).suffix.lower() in (".mp4", ".mp3"):
                     audio_file = convert_to_wav(input_file, tmpdir)
                 else:
-                    audio_file = input_file
-
+                    audio_file = input_file 
+                    
                 transcript_segments = transcribe_with_whisper(audio_file, whisper_model)
                 
                 speaker_segments = diarize_with_pyannote(audio_file, diarization_pipeline)
@@ -193,36 +192,33 @@ def process_files(files, whisper_model, diarization_pipeline, out_path_base):
 
                 record = {"file": os.path.basename(input_file), "conversation": conversation}
                 
-                # Write the individual Markdown file
                 write_single_markdown(record, md_output_dir)
                 
                 print(f"File processing complete: {os.path.basename(input_file)}")
 
-            except subprocess.CalledProcessError:
-                print(f"Error: FFmpeg required but failed for {os.path.basename(input_file)}. Check installation.")
+            except (subprocess.CalledProcessError, FileNotFoundError) as e:
+                error_msg = "FFmpeg conversion failed." if isinstance(e, subprocess.CalledProcessError) else "FFmpeg not found."
+                print(f"Error: {error_msg} for {os.path.basename(input_file)}. Check installation or path.")
             except Exception as e:
                 print(f"Error processing {os.path.basename(input_file)}. Details: {e}")
 
     print(f"\nProcess complete. All transcripts saved as individual Markdown files in {md_output_dir}.")
 
-# --- Argument Parsing and Main Logic ---
-
 def parse_args():
     """Defines and parses command-line arguments, including the help banner."""
     
-    # --- Banner and Help Message ---
     banner = """
-                                  ___                                       ___             ___           ___                       ___           ___     
-     _____                       /\  \         _____         _____         /\__\           /\  \         /\__\                     /\__\         /\  \    
-    /::\  \                     /::\  \       /::\  \       /::\  \       /:/ _/_         /::\  \       /:/ _/_       ___         /:/ _/_        \:\  \   
-   /:/\:\  \                   /:/\:\  \     /:/\:\  \     /:/\:\  \     /:/ /\__\       /:/\:\__\     /:/ /\__\     /\__\       /:/ /\  \        \:\  \  
-  /:/ /::\__\   ___     ___   /:/ /::\  \   /:/ /::\__\   /:/ /::\__\   /:/ /:/ _/_     /:/ /:/  /    /:/ /:/  /    /:/__/      /:/ /::\  \   ___ /::\  \ 
- /:/_/:/\:|__| /\  \   /\__\ /:/_/:/\:\__\ /:/_/:/\:|__| /:/_/:/\:|__| /:/_/:/ /\__\   /:/_/:/__/___ /:/_/:/  /    /::\  \     /:/_/:/\:\__\ /\  /:/\:\__\
- \:\/:/ /:/  / \:\  \ /:/  / \:\/:/  \/__/ \:\/:/ /:/  / \:\/:/ /:/  / \:\/:/ /:/  /   \:\/:::::/  / \:\/:/  /     \/\:\  \__  \:\/:/ /:/  / \:\/:/  \/__/
-  \::/_/:/  /   \:\  /:/  /   \::/__/       \::/_/:/  /   \::/_/:/  /   \::/_/:/  /     \::/~~/~~~~   \::/__/       ~~\:\/\__\  \::/ /:/  /   \::/__/     
-   \:\/:/  /     \:\/:/  /     \:\  \        \:\/:/  /     \:\/:/  /     \:\/:/  /       \:\~~\        \:\  \          \::/  /   \/_/:/  /     \:\  \     
-    \::/  /       \::/  /       \:\__\        \::/  /       \::/  /       \::/  /         \:\__\        \:\__\         /:/  /      /:/  /       \:\__\    
-     \/__/         \/__/         \/__/         \/__/         \/__/         \/__/           \/__/         \/__/         \/__/       \/__/         \/__/    
+                                  ___                                       ___             ___           ___                       ___           ___     
+     _____                       /\  \         _____         _____         /\__\           /\  \         /\__\                     /\__\         /\  \    
+    /::\  \                     /::\  \       /::\  \       /::\  \       /:/ _/_         /::\  \       /:/ _/_       ___         /:/ _/_        \:\  \   
+   /:/\:\  \                   /:/\:\  \     /:/\:\  \     /:/\:\  \     /:/ /\__\       /:/\:\__\     /:/ /\__\     /\__\       /:/ /\  \        \:\  \  
+  /:/ /::\__\   ___     ___   /:/ /::\  \   /:/ /::\__\   /:/ /::\__\   /:/ /:/ _/_     /:/ /:/  /    /:/ /:/  /    /:/__/      /:/ /::\  \   ___ /::\  \ 
+ /:/_/:/\:|__| /\  \   /\__\ /:/_/:/\:\__\ /:/_/:/\:|__| /:/_/:/\:|__| /:/_/:/ /\__\   /:/_/:/__/___ /:/_/:/  /    /::\  \     /:/_/:/\:\__\ /\  /:/\:\__\
+ \:\/:/ /:/  / \:\  \ /:/  / \:\/:/  \/__/ \:\/:/ /:/  / \:\/:/ /:/  / \:\/:/ /:/  /   \:\/:::::/  / \:\/:/  /     \/\:\  \__  \:\/:/ /:/  / \:\/:/  \/__/
+  \::/_/:/  /   \:\  /:/  /   \::/__/       \::/_/:/  /   \::/_/:/  /   \::/_/:/  /     \::/~~/~~~~   \::/__/       ~~\:\/\__\  \::/ /:/  /   \::/__/     
+   \:\/:/  /     \:\/:/  /     \:\  \        \:\/:/  /     \:\/:/  /     \:\/:/  /       \:\~~\        \:\  \          \::/  /   \/_/:/  /     \:\  \     
+    \::/  /       \::/  /       \:\__\        \::/  /       \::/  /       \::/  /         \:\__\        \:\__\         /:/  /      /:/  /       \:\__\    
+     \/__/         \/__/         \/__/         \/__/         \/__/         \/__/           \/__/         \/__/         \/__/       \/__/         \/__/    
 
 Transcribe Phone Call Audio
 By BHIS
@@ -231,15 +227,15 @@ By BHIS
 
     parser = argparse.ArgumentParser(
         description=banner,
-        formatter_class=argparse.RawTextHelpFormatter  # Allows banner to display nicely
+        formatter_class=argparse.RawTextHelpFormatter
     )
     parser.add_argument("--zip", help="Path to a ZIP file containing MP3/MP4s")
     parser.add_argument("--mp3", help="Path to a single MP3 file")
     parser.add_argument("--mp4", help="Path to a single MP4 file")
     parser.add_argument(
         "--out", 
-        default="transcriptions.jsonl", 
-        help="Base path for output. Only the directory is used to save the Markdown files. Default directory is current (.)."
+        default=".",
+        help="Output directory for Markdown files. Default is current directory (.)."
     )
     parser.add_argument(
         "--whisper-model",
@@ -253,24 +249,20 @@ By BHIS
 
     args = parser.parse_args()
 
-    # Pre-check for required arguments BEFORE model loading
     if not args.zip and not args.mp3 and not args.mp4:
-        # parser.error() prints the usage/banner and exits immediately.
         parser.error("Must provide one of: --zip, --mp3, or --mp4.")
     
     if not args.pyannote_token:
         parser.error("Must provide --pyannote-token.")
 
+    args.out = os.path.dirname(args.out) or "."
+    
     return args
 
 
 def main():
-    # 1. Parse arguments first. If -h is used, the script exits here.
-    # If required arguments are missing, the script exits here with an error.
     args = parse_args()
     
-    # 2. Load models only if all necessary arguments are present
-
     model_spinner = Halo(
         text=f"Loading Whisper model: {args.whisper_model}...", 
         spinner=SPINNER_TYPE, 
@@ -294,10 +286,9 @@ def main():
         )
         diarization_spinner.succeed("Pyannote pipeline loaded.")
     except Exception as e:
-        diarization_spinner.fail(f"Failed to load Pyannote pipeline. Check token/network. Details: {e}")
+        diarization_spinner.fail(f"Failed to load Pyannote pipeline. Check token/network/permissions. Details: {e}")
         return
 
-    # 3. Process files
     files = []
     if args.zip:
         zip_spinner = Halo(
@@ -305,14 +296,24 @@ def main():
             spinner=SPINNER_TYPE, 
             color=SPINNER_COLOR
         ).start()
-        with tempfile.TemporaryDirectory() as tmpdir:
-            files = extract_zip(args.zip, tmpdir)
-            zip_spinner.succeed(f"Extracted {len(files)} media file(s).")
-            # Pass the base output path's directory information
-            process_files(files, whisper_model, diarization_pipeline, args.out)
+        
+
+        try:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                files = extract_zip(args.zip, tmpdir)
+                zip_spinner.succeed(f"Extracted {len(files)} media file(s).")
+                process_files(files, whisper_model, diarization_pipeline, args.out)
+        except BadZipFile as e:
+            zip_spinner.fail(str(e))
+            return
+        except Exception as e:
+            zip_spinner.fail(f"An unexpected error occurred during ZIP processing: {e}")
+            return
+
     elif args.mp3:
         files = [args.mp3]
         process_files(files, whisper_model, diarization_pipeline, args.out)
+        
     elif args.mp4:
         files = [args.mp4]
         process_files(files, whisper_model, diarization_pipeline, args.out)
