@@ -139,86 +139,83 @@ def merge_adjacent_segments(segments):
     return merged
 
 
-def write_markdown(jsonl_records, md_path, split_md=False):
-    """Write transcripts as Markdown (one file or multiple if split_md=True)."""
+def write_single_markdown(record, output_dir="."):
+    """Write transcript as a single Markdown file based on the audio filename."""
+    filename = record["file"]
+    conversation = record["conversation"]
     timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-
-    if split_md:
-        for record in jsonl_records:
-            filename = record["file"]
-            conversation = record["conversation"]
-            out_path = os.path.join(
-                os.path.dirname(md_path) or ".",
-                f"{os.path.splitext(filename)[0]}.md",
-            )
-            with open(out_path, "w", encoding="utf-8") as out_f:
-                out_f.write(f"# {filename}\n\n")
-                out_f.write(f"## Conversation {timestamp}\n\n")
-                for entry in conversation:
-                    out_f.write(f"**{entry['speaker']}**: {entry['text']}\n\n")
-            print(f"Markdown transcript saved to {out_path}")
-    else:
-        with open(md_path, "w", encoding="utf-8") as out_f:
-            for record in jsonl_records:
-                filename = record["file"]
-                conversation = record["conversation"]
-                out_f.write(f"# {filename}\n\n")
-                out_f.write(f"## Conversation {timestamp}\n\n")
-                for entry in conversation:
-                    out_f.write(f"**{entry['speaker']}**: {entry['text']}\n\n")
-                out_f.write("---\n\n")
-        print(f"Combined Markdown transcript saved to {md_path}")
+    
+    # Determine the output path for the Markdown file
+    # We use the base directory of the specified output name (default is ".")
+    out_path = os.path.join(
+        output_dir, # Use the output directory derived from the original --out path
+        f"{os.path.splitext(filename)[0]}.md",
+    )
+    
+    with open(out_path, "w", encoding="utf-8") as out_f:
+        out_f.write(f"# {filename}\n\n")
+        out_f.write(f"## Conversation {timestamp}\n\n")
+        for entry in conversation:
+            out_f.write(f"**{entry['speaker']}**: {entry['text']}\n\n")
+            
+    print(f"Markdown transcript saved to {out_path}")
 
 
-def process_files(files, whisper_model, diarization_pipeline, out_path, split_md):
-    """Process and transcribe a list of mp3/mp4 files, writing JSONL + Markdown output."""
+def process_files(files, whisper_model, diarization_pipeline, out_path_base):
+    """Process and transcribe a list of mp3/mp4 files, writing a Markdown output per file."""
     if not files:
         print("No media files found.")
         return
 
-    records = []
+    # Determine the directory for Markdown output (using the directory of the original --out argument)
+    md_output_dir = os.path.dirname(out_path_base) or "."
+    
     with tempfile.TemporaryDirectory() as tmpdir:
-        with open(out_path, "w", encoding="utf-8") as out_f:
-            for input_file in files:
-                print(f"\nProcessing file: {os.path.basename(input_file)}")
-                try:
-                    
-                    if Path(input_file).suffix.lower() == ".mp4":
-                        audio_file = convert_to_wav(input_file, tmpdir)
-                    else:
-                        audio_file = input_file
+        for input_file in files:
+            print(f"\nProcessing file: {os.path.basename(input_file)}")
+            try:
+                
+                # Check file extension and convert to WAV if necessary
+                if Path(input_file).suffix.lower() in (".mp4", ".mp3"):
+                    audio_file = convert_to_wav(input_file, tmpdir)
+                else:
+                    audio_file = input_file
 
-                    transcript_segments = transcribe_with_whisper(audio_file, whisper_model)
-                    
-                    speaker_segments = diarize_with_pyannote(audio_file, diarization_pipeline)
-                    
-                    conversation = align_transcription_with_diarization(
-                        transcript_segments, speaker_segments
-                    )
+                transcript_segments = transcribe_with_whisper(audio_file, whisper_model)
+                
+                speaker_segments = diarize_with_pyannote(audio_file, diarization_pipeline)
+                
+                conversation = align_transcription_with_diarization(
+                    transcript_segments, speaker_segments
+                )
 
-                    record = {"file": os.path.basename(input_file), "conversation": conversation}
-                    records.append(record)
-                    out_f.write(json.dumps(record, ensure_ascii=False) + "\n")
-                    print(f"File processing complete: {os.path.basename(input_file)}")
+                record = {"file": os.path.basename(input_file), "conversation": conversation}
+                
+                # Write the individual Markdown file
+                write_single_markdown(record, md_output_dir)
+                
+                print(f"File processing complete: {os.path.basename(input_file)}")
 
-                except subprocess.CalledProcessError:
-                    print(f"Error: FFmpeg required but failed for {os.path.basename(input_file)}. Check installation.")
-                except Exception as e:
-                    print(f"Error processing {os.path.basename(input_file)}. Details: {e}")
+            except subprocess.CalledProcessError:
+                print(f"Error: FFmpeg required but failed for {os.path.basename(input_file)}. Check installation.")
+            except Exception as e:
+                print(f"Error processing {os.path.basename(input_file)}. Details: {e}")
 
-    md_path = os.path.splitext(out_path)[0] + ".md"
-    write_markdown(records, md_path, split_md)
-    print(f"\nProcess complete. JSONL saved to {out_path}.")
+    print(f"\nProcess complete. All transcripts saved as individual Markdown files in {md_output_dir}.")
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Transcribe media files with Whisper and Pyannote diarization."
+        description="Transcribe media files with Whisper and Pyannote diarization, outputting one Markdown file per media file."
     )
     parser.add_argument("--zip", help="Path to a ZIP file containing MP3/MP4s")
     parser.add_argument("--mp3", help="Path to a single MP3 file")
     parser.add_argument("--mp4", help="Path to a single MP4 file")
-    parser.add_argument("--out", default="transcriptions.jsonl", help="Output JSONL file")
+    parser.add_argument(
+        "--out", 
+        default="transcriptions.jsonl", 
+        help="Base path for output. Only the directory is used to save the Markdown files. Default directory is current (.)."
+    )
     parser.add_argument(
         "--whisper-model",
         default="base",
@@ -228,11 +225,8 @@ def main():
         "--pyannote-token", 
         help="HuggingFace access token for pyannote models. Required."
     )
-    parser.add_argument(
-        "--split-md",
-        action="store_true",
-        help="Save one Markdown file per media file (default is combined output).",
-    )
+    # The --split-md argument is removed as splitting is now the default/only behavior
+
     args = parser.parse_args()
 
     if not args.zip and not args.mp3 and not args.mp4:
@@ -277,13 +271,14 @@ def main():
         with tempfile.TemporaryDirectory() as tmpdir:
             files = extract_zip(args.zip, tmpdir)
             zip_spinner.succeed(f"Extracted {len(files)} media file(s).")
-            process_files(files, whisper_model, diarization_pipeline, args.out, args.split_md)
+            # Pass the base output path's directory information
+            process_files(files, whisper_model, diarization_pipeline, args.out)
     elif args.mp3:
         files = [args.mp3]
-        process_files(files, whisper_model, diarization_pipeline, args.out, args.split_md)
+        process_files(files, whisper_model, diarization_pipeline, args.out)
     elif args.mp4:
         files = [args.mp4]
-        process_files(files, whisper_model, diarization_pipeline, args.out, args.split_md)
+        process_files(files, whisper_model, diarization_pipeline, args.out)
 
 
 if __name__ == "__main__":
