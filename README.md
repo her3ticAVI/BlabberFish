@@ -13,7 +13,7 @@
   <a href="https://x.com/BHinfoSecurity"><img src="https://img.shields.io/github/stars/her3ticAVI/BlabberFish?style=flat-square&color=rgb(255%2C218%2C185)" alt="BlabberFish Stars" /></a>
   
 <p class="align center">
-<h4><code>BlabberFish</code> is a dedicated web server application and CLI tool engineered to simplify and automate the documentation of audio conversations. It takes raw audio files and converts them into structured, readable text transcripts. The goal of this tool is to create ease of documentation for pentesters in the social engineering sphere.</h4>
+<h4><code>BlabberFish</code> is a dedicated web server application and CLI tool engineered to simplify and automate the documentation of audio conversations. It takes raw audio files and converts them into structured, readable text transcripts. The goal of this tool is to create ease of documentation for pentesters in the social engineering sphere. All audio fed into BlabberFish is handled locally (Hugging Face won't get your data).</h4>
 </p>
 
 <div style="text-align: center;">
@@ -26,6 +26,8 @@
 <hr>
 <a href="https://blackhillsinfosec.com"><img width="75%" height="75%" src="https://github.com/her3ticAVI/BlabberFish/blob/main/images/BlabberFish-running.png" alt="BlabberFish Running" /></a>
 <div align="left">
+
+> Note: `BlabberFish` keeps all audio fed into it local and does not distrubute client information to third parties. Heretic may develope a lite version later to use Hugging Face to handle computation for those who lack hardware.
 
 ## Navigation
 
