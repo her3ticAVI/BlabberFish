@@ -52,6 +52,8 @@ The following command should set up the environment required to use BlabberFish.
 wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh
 bash ~/Miniconda3-latest-Linux-x86_64.sh
 source ~/.bashrc
+git clone https://github.com/her3ticAVI/BlabberFish
+cd BlabberFish
 conda env create -f environment.yml
 conda activate BabbelFish-venv
 sudo apt install ffmpeg
