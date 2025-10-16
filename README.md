@@ -70,19 +70,6 @@ For the `transcribe_pyannote.py` script, `pyannote.audio` diarization requires a
 
 Get a free token at `https://huggingface.co/settings/tokens` and then make it read only access, then search for `pyannote/speaker-diarization` model and accept the license.
 
-Login to Hugging Face
-```shell
-huggingface-cli login
-```
-
-Input your username then your password is the access token you generated
-
-```shell
-git clone https://huggingface.co/pyannote/speaker-diarization local_pyannote_models
-```
-
-This local copy will be used for the tool.
-
 ## References
 
 - https://github.com/mr-pmillz/transcribe
