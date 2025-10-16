@@ -1,6 +1,0 @@
-ffmpeg-python
-openai-whisper
-pyannote.audio
-torch
-librosa
-

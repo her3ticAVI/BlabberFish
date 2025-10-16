@@ -1,0 +1,3 @@
+ffmpeg-python
+openai-whisper
+pyannote.audio

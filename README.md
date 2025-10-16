@@ -1,41 +1,72 @@
-# transcribe
+<div align="center">
+<a href="https://blackhillsinfosec.com"><img width="100%" src="https://github.com/her3ticAVI/BlabberFish/images/BlabberFishLogo.png" alt="BlabberFish Logo" /></a>
+<hr>
 
-## Installation
+  <a href="https://github.com/blackhillsinfosec/WifiForge/actions"><img alt="GitHub Workflow Status" src="https://img.shields.io/github/actions/workflow/status/her3ticAVI/BlabberFish/.github%2Fworkflows%2Fpython-app.yml?style=flat-square"></a> 
+  &nbsp;
+  <a href="https://discord.com/invite/bhis"><img alt="Discord" src="https://img.shields.io/discord/967097582721572934?label=Discord&color=7289da&style=flat-square" /></a>
+  &nbsp;
+  <a href="https://github.com/blackhillsinfosec/WifiForge/graphs/contributors"><img alt="npm" src="https://img.shields.io/github/contributors-anon/her3ticAVI/BlabberFish?color=yellow&style=flat-square" /></a>
+  &nbsp;
+  <a href="https://x.com/BHinfoSecurity"><img src="https://img.shields.io/badge/follow-BHIS-1DA1F2?logo=twitter&style=flat-square" alt="BHIS Twitter" /></a>
+  &nbsp;
+  <a href="https://x.com/BHinfoSecurity"><img src="https://img.shields.io/github/stars/her3ticAVI/BlabberFish?style=flat-square&color=rgb(255%2C218%2C185)" alt="BlabberFish Stars" /></a>
+  
+<p class="align center">
+<h4><code>BlabberFish</code> was created with the goal of taking audio files, and converting them to text files. The problem this aims to solve is ease of documentation on Social Engineering calls. We are not responsible for misuse of this tool.</h4>
+</p>
 
-### Linux
+<div style="text-align: center;">
+  <h4>
+    <a target="_blank" href="https://blabberfish.github.io/" rel="dofollow"><strong>Explore the Docs</strong></a>&nbsp;·&nbsp;
+    <a target="_blank" href="https://discord.com/invite/bhis" rel="dofollow"><strong>Community Help</strong></a>&nbsp;·&nbsp;
+    <a target="_blank" href="https://www.blackhillsinfosec.com/blabberfish/" rel="dofollow"><strong>Blog Post</strong></a>
+  </h4>
+</div>
+<hr>
+<a href="https://blackhillsinfosec.com"><img width="75%" height="75%" src="https://github.com/her3ticAVI/BlabberFish/blob/main/images/BlabberFish-running.png" alt="BlabberFish Running" /></a>
+<div align="left">
+
+## Navigation
+
+- [Installation Documentation](https://blabberfish.github.io/Installation)
+- [Walkthroughs](https://blabberfish.github.io/Lab-Walkthroughs/)
+- [Troubleshooting](https://blabberfish.github.io/Troubleshooting)
+- [Overview](https://blabberfish.github.io/Overview)
+- [Contributing](https://blabberfish.github.io/Development)
+
+## BlabberFish Setup
+### Pre-req Installation
+
+The following command should set up the environment required to use BlabberFish. Only Linux is supported at this time.
 
 ```shell
+wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh
+bash ~/Miniconda3-latest-Linux-x86_64.sh
+source ~/.bashrc
+conda env create -f environment.yml
+conda activate BabbelFish-venv
 sudo apt install ffmpeg
-
-# this fails may need to do:
-sudo apt update
-sudo apt install ffmpeg --fix-missing
 ```
-
-### Mac
-
-```shell
-brew install ffmpeg
-```
-
-Now install requirements in a virtualenv
-
-```shell
-virtualenv -p python3 venv/transcribe
-source venv/transcribe/bin/activate
-python3 -m pip install -r requirements.txt
-```
-
 ### Hugging Face Token
 
-for the `transcribe_pyannote.py` script, `pyannote.audio` diarization requires access to pretrained models on HuggingFace.
+For the `transcribe_pyannote.py` script, `pyannote.audio` diarization requires access to pretrained models on HuggingFace.
 
 Get a free token at https://huggingface.co/settings/tokens and then make it read only access, then search for pyannote/speaker-diarization model and accept the license.
 
-## Usage
+## Example Usage
 
 ```shell
+{{ TODO }}
 
 ```
 
 
+## References
+
+- https://github.com/mr-pmillz/transcribe
+
+
+<div align="center">
+
+Made with ❤️  by Black Hills Infosec

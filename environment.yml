@@ -1,0 +1,15 @@
+name: BlabberFish-venv
+channels:
+  - conda-forge
+  - pytorch
+  - defaults
+dependencies:
+  - python=3.10
+  - pip
+  - pytorch  # <-- Change this to 'pytorch'
+  - librosa
+  - ffmpeg
+  - pip:
+      - ffmpeg-python
+      - openai-whisper
+      - pyannote.audio
