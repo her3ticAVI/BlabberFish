@@ -42,9 +42,7 @@
 
 ```
 
-## Setup
-
-### Installation
+## Installing from Source (DEV)
 
 The following command should set up the environment required to use BlabberFish. Only Linux is supported at this time.
 
@@ -52,13 +50,21 @@ The following command should set up the environment required to use BlabberFish.
 wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh
 bash ~/Miniconda3-latest-Linux-x86_64.sh
 source ~/.bashrc
+```
+Once Miniconda installs setup the virtual environment.
+```shell
 git clone https://github.com/her3ticAVI/BlabberFish
 cd BlabberFish
 conda env create -f environment.yml
 conda activate BabbelFish-venv
-sudo apt install ffmpeg
+sudo apt install ffmpeg -y
 ```
-### Hugging Face Token
+
+## Docker
+
+{{ TODO }}
+
+## Hugging Face Token
 
 For the `transcribe_pyannote.py` script, `pyannote.audio` diarization requires access to pretrained models on HuggingFace.
 
