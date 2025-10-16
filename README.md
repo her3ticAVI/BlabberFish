@@ -60,10 +60,6 @@ conda activate BabbelFish-venv
 sudo apt install ffmpeg -y
 ```
 
-## Docker
-
-{{ TODO }}
-
 ## Hugging Face Token
 
 For the `transcribe_pyannote.py` script, `pyannote.audio` diarization requires access to pretrained models on HuggingFace.
