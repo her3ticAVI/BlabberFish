@@ -1,113 +1,241 @@
+#!/usr/bin/env python3
+
+import warnings
+warnings.filterwarnings(
+    "ignore",
+    message=".*torchaudio.*list_audio_backends.*deprecated.*"
+)
+
 import argparse
 import json
-import sys
-import torch
+import os
+import tempfile
+import zipfile
+from pathlib import Path
+from datetime import datetime, timezone
+import subprocess
+
 import whisper
 from pyannote.audio import Pipeline
-from pyannote.core import Segment
 
-def get_device():
-    """Determine the device (CPU or CUDA) and log the selection."""
-    if os.environ.get('FORCE_CPU', '0') == '1':
-        device = torch.device("cpu")
-        print("DEBUG: Environment variable FORCE_CPU=1 found. Using CPU.")
-    elif torch.cuda.is_available():
-        device = torch.device("cuda")
-        print("DEBUG: CUDA found. Using GPU with memory-safe settings.")
-    else:
-        device = torch.device("cpu")
-        print("DEBUG: CUDA not available. Using CPU.")
-    return device
 
-def run_diarization(audio_path: str, pyannote_path: str, device: torch.device):
-    """Run Pyannote Diarization (Who spoke when)."""
-    print(f"\n--- 1. Running Pyannote Diarization on {audio_path} ---")
-    
-    if device.type == 'cuda' and os.environ.get('PYTORCH_NO_CUDA_MEMORY_CACHING', '0') != '1':
-        print("WARNING: Consider running with PYTORCH_NO_CUDA_MEMORY_CACHING=1 for stability.")
+def extract_zip(zip_path, extract_to):
+    """Extract all mp3/mp4 files from a zip archive into a temporary directory."""
+    with zipfile.ZipFile(zip_path, "r") as z:
+        z.extractall(extract_to)
+    return [
+        str(p)
+        for p in Path(extract_to).rglob("*")
+        if p.suffix.lower() in (".mp3", ".mp4")
+    ]
 
-    try:
-        pipeline = Pipeline.from_pretrained(
-            pyannote_path,
-            use_auth_token=False
-        ).to(device)
-        
-        diarization = pipeline(audio_path)
-        if device.type == 'cuda':
-            torch.cuda.empty_cache()
-            
-    except Exception as e:
-        print(f"FATAL: Diarization failed. Error: {e}")
-        sys.exit(1)
-        
-    print("Diarization complete.")
-    return diarization
 
-def run_transcription(audio_path: str, diarization, whisper_model_name: str, device: torch.device):
-    """Run Whisper Transcription, segment by Pyannote's output."""
-    print(f"\n--- 2. Running Whisper Transcription (Model: {whisper_model_name}) ---")
-    
-    try:
-        whisper_model = whisper.load_model(whisper_model_name, device=device)
-    except Exception as e:
-        print(f"FATAL: Whisper model failed to load. Error: {e}")
-        sys.exit(1)
-        
-    audio_full = whisper.load_audio(audio_path)
-    final_conversation = []
+def convert_to_wav(input_file, tmpdir):
+    """Convert mp3/mp4 to wav using ffmpeg (for pyannote compatibility)."""
+    output_file = os.path.join(
+        tmpdir, os.path.splitext(os.path.basename(input_file))[0] + ".wav"
+    )
+    subprocess.run(
+        ["ffmpeg", "-y", "-i", input_file, "-ar", "16000", "-ac", "1", output_file],
+        check=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    return output_file
 
+
+def transcribe_with_whisper(audio_file, model):
+    """Transcribe audio file using Whisper (local). Returns structured segments."""
+    print(f"  ▶ Transcribing {os.path.basename(audio_file)} with Whisper...")
+    result = model.transcribe(audio_file, verbose=False) 
+    return result.get("segments", [])
+
+
+def diarize_with_pyannote(audio_file, diarization_pipeline):
+    """Run speaker diarization on audio file. Returns speaker segments."""
+    print(f"  ▶ Running diarization on {os.path.basename(audio_file)}...")
+    diarization = diarization_pipeline(audio_file)
+    speaker_segments = []
     for turn, _, speaker in diarization.itertracks(yield_label=True):
-        
-        start_sample = int(turn.start * whisper.audio.SAMPLE_RATE)
-        end_sample = int(turn.end * whisper.audio.SAMPLE_RATE)
-        
-        segment_audio = audio_full[start_sample:end_sample]
-        
-        try:
-            result = whisper_model.transcribe(segment_audio, device=device)
-            text = result["text"].strip()
-        except Exception as e:
-            text = f"[Transcription Error: {e}]"
-        
-        if device.type == 'cuda':
-            torch.cuda.empty_cache()
+        speaker_segments.append(
+            {"start": turn.start, "end": turn.end, "speaker": speaker}
+        )
+    return speaker_segments
+
+
+def align_transcription_with_diarization(transcript_segments, speaker_segments):
+    """Align Whisper transcript segments with diarized speaker segments."""
+    aligned = []
+    for t in transcript_segments:
+        t_start, t_end, text = t["start"], t["end"], t["text"].strip()
+        best_speaker = None
+        best_overlap = 0.0
+
+        for s in speaker_segments:
+            overlap = max(0, min(t_end, s["end"]) - max(t_start, s["start"]))
             
-        if text: 
-            final_conversation.append({
-                "speaker": speaker,
-                "start": round(turn.start, 3),
-                "end": round(turn.end, 3),
-                "text": text
-            })
+            if overlap > best_overlap:
+                best_overlap = overlap
+                best_speaker = s["speaker"]
 
-    print("Transcription and segment merging complete.")
-    return final_conversation
+        aligned.append(
+            {
+                "speaker": best_speaker if best_speaker else "unknown",
+                "start": t_start,
+                "end": t_end,
+                "text": text,
+            }
+        )
+    return merge_adjacent_segments(aligned)
 
-def save_conversation(conversation, out_path):
-    """Save the final conversation to JSONL."""
-    print(f"\n--- 3. Saving Final Conversation to {out_path} ---")
-    with open(out_path, "w", encoding="utf-8") as out_f:
-        for record in conversation:
-            out_f.write(json.dumps(record, ensure_ascii=False) + "\n")
-    print(f"✅ Final conversation saved.")
+
+def merge_adjacent_segments(segments):
+    """Merge consecutive transcript segments by the same speaker."""
+    if not segments:
+        return []
+    
+    merged = [segments[0]]
+    for seg in segments[1:]:
+        last = merged[-1]
+        if seg["speaker"] == last["speaker"]:
+            last["text"] += " " + seg["text"]
+            last["end"] = seg["end"]
+        else:
+            merged.append(seg)
+    return merged
+
+
+def write_markdown(jsonl_records, md_path, split_md=False):
+    """Write transcripts as Markdown (one file or multiple if split_md=True)."""
+    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+
+    if split_md:
+        for record in jsonl_records:
+            filename = record["file"]
+            conversation = record["conversation"]
+            out_path = os.path.join(
+                os.path.dirname(md_path) or ".",
+                f"{os.path.splitext(filename)[0]}.md",
+            )
+            with open(out_path, "w", encoding="utf-8") as out_f:
+                out_f.write(f"# {filename}\n\n")
+                out_f.write(f"## Conversation {timestamp}\n\n")
+                for entry in conversation:
+                    out_f.write(f"**{entry['speaker']}**: {entry['text']}\n\n")
+            print(f"✅ Markdown transcript saved to {out_path}")
+    else:
+        with open(md_path, "w", encoding="utf-8") as out_f:
+            for record in jsonl_records:
+                filename = record["file"]
+                conversation = record["conversation"]
+                out_f.write(f"# {filename}\n\n")
+                out_f.write(f"## Conversation {timestamp}\n\n")
+                for entry in conversation:
+                    out_f.write(f"**{entry['speaker']}**: {entry['text']}\n\n")
+                out_f.write("---\n\n")
+        print(f"✅ Combined Markdown transcript saved to {md_path}")
+
+
+def process_files(files, whisper_model, diarization_pipeline, out_path, split_md):
+    """Process and transcribe a list of mp3/mp4 files, writing JSONL + Markdown output."""
+    if not files:
+        print("No media files found.")
+        return
+
+    records = []
+    with tempfile.TemporaryDirectory() as tmpdir:
+        with open(out_path, "w", encoding="utf-8") as out_f:
+            for input_file in files:
+                try:
+                    print(f"\nProcessing {os.path.basename(input_file)}...")
+                    
+                    if Path(input_file).suffix.lower() == ".mp4":
+                        audio_file = convert_to_wav(input_file, tmpdir)
+                        print(f"  ▶ Converted to WAV: {os.path.basename(audio_file)}")
+                    else:
+                        audio_file = input_file
+
+                    transcript_segments = transcribe_with_whisper(audio_file, whisper_model)
+                    
+                    speaker_segments = diarize_with_pyannote(audio_file, diarization_pipeline)
+                    
+                    conversation = align_transcription_with_diarization(
+                        transcript_segments, speaker_segments
+                    )
+
+                    record = {"file": os.path.basename(input_file), "conversation": conversation}
+                    records.append(record)
+                    out_f.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+                except subprocess.CalledProcessError:
+                    print(f"❌ Error: ffmpeg failed to process {os.path.basename(input_file)}. Is ffmpeg installed and accessible?")
+                except Exception as e:
+                    print(f"❌ Error processing {os.path.basename(input_file)}: {e}")
+
+    md_path = os.path.splitext(out_path)[0] + ".md"
+    write_markdown(records, md_path, split_md)
+    print(f"\n✅ All JSONL transcripts saved to {out_path}")
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Full Pipeline: Diarization (Pyannote) + Transcription (Whisper).")
-    parser.add_argument("--mp3", type=str, required=True, help="Path to the input audio file (.mp3 or .wav).")
-    parser.add_argument("--pyannote-path", type=str, required=True, help="Path to the local Pyannote repository directory (e.g., './blabberfish').")
-    parser.add_argument("--whisper-model", default="base", help="Whisper model size (tiny, base, small, medium, large).")
-    parser.add_argument("--out", default="conversation.jsonl", help="Output JSONL file path for the conversation.")
-
+    parser = argparse.ArgumentParser(
+        description="Transcribe MP3/MP4 into JSONL + Markdown with Whisper + Pyannote diarization."
+    )
+    parser.add_argument("--zip", help="Path to a ZIP file containing MP3/MP4s")
+    parser.add_argument("--mp3", help="Path to a single MP3 file")
+    parser.add_argument("--mp4", help="Path to a single MP4 file")
+    parser.add_argument("--out", default="transcriptions.jsonl", help="Output JSONL file")
+    parser.add_argument(
+        "--whisper-model",
+        default="base",
+        help="Whisper model size (tiny, base, small, medium, large). Default is 'base'.",
+    )
+    parser.add_argument(
+        "--pyannote-token", 
+        help="HuggingFace access token for pyannote models. Required for diarization."
+    )
+    parser.add_argument(
+        "--split-md",
+        action="store_true",
+        help="Save one Markdown file per media file instead of a combined one",
+    )
     args = parser.parse_args()
+
+    if not args.zip and not args.mp3 and not args.mp4:
+        parser.error("You must provide either --zip, --mp3, or --mp4")
     
-    device = get_device()
-    
-    diarization_output = run_diarization(args.mp3, args.pyannote_path, device)
-    
-    final_conversation = run_transcription(args.mp3, diarization_output, args.whisper_model, device)
-    
-    save_conversation(final_conversation, args.out)
+    if not args.pyannote_token:
+        parser.error("You must provide --pyannote-token (HuggingFace access token). Get one from https://huggingface.co/settings/tokens")
+
+    print(f"Loading Whisper model: {args.whisper_model} ...")
+    try:
+        whisper_model = whisper.load_model(args.whisper_model)
+    except Exception as e:
+        print(f"❌ Error loading Whisper model '{args.whisper_model}': {e}")
+        return
+
+    print("Loading Pyannote diarization pipeline...")
+    try:
+        diarization_pipeline = Pipeline.from_pretrained(
+            "pyannote/speaker-diarization", use_auth_token=args.pyannote_token
+        )
+    except Exception as e:
+        print(f"❌ Error loading Pyannote pipeline. Check your --pyannote-token and network connection: {e}")
+        return
+
+    files = []
+    if args.zip:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            print(f"Extracting ZIP file {args.zip}...")
+            files = extract_zip(args.zip, tmpdir)
+            process_files(files, whisper_model, diarization_pipeline, args.out, args.split_md)
+    elif args.mp3:
+        files = [args.mp3]
+        process_files(files, whisper_model, diarization_pipeline, args.out, args.split_md)
+    elif args.mp4:
+        files = [args.mp4]
+        process_files(files, whisper_model, diarization_pipeline, args.out, args.split_md)
+
 
 if __name__ == "__main__":
     main()
