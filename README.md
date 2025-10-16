@@ -65,7 +65,6 @@ BlabberFish Example Output
 **SPEAKER_01**: I've finalized the Q3 report. The marketing spend was 15% under budget.
 
 **SPEAKER_00**: Excellent news. And what about the development team's resource allocation for the next sprint?
----
 ```
 
 ## Installing from Source (DEV Purposes)
