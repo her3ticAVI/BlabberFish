@@ -146,7 +146,7 @@ def write_single_markdown(record, output_dir="."):
     timestamp = datetime.now(timezone.utc).astimezone(datetime.now().astimezone().tzinfo).strftime("%B %d, %Y, %I:%M %p %Z")
     
     out_path = os.path.join(
-        output_dir,
+        output_dir, 
         f"{os.path.splitext(filename)[0]}.md",
     )
     
@@ -199,7 +199,9 @@ def process_files(files, whisper_model, diarization_pipeline, out_path_base):
     print(f"\nProcess complete. All transcripts saved as individual Markdown files in {md_output_dir}.")
 
 
-def main():
+def parse_args():
+    """Defines and parses command-line arguments, including the help banner."""
+    
     banner = """
                                   ___                                       ___             ___           ___                       ___           ___     
      _____                       /\  \         _____         _____         /\__\           /\  \         /\__\                     /\__\         /\  \    
@@ -216,7 +218,7 @@ def main():
 Transcribe Phone Call Audio
 By BHIS
     """
-    
+
     parser = argparse.ArgumentParser(
         description=banner,
         formatter_class=argparse.RawTextHelpFormatter
@@ -246,6 +248,13 @@ By BHIS
     
     if not args.pyannote_token:
         parser.error("Must provide --pyannote-token.")
+
+    return args
+
+
+def main():
+    args = parse_args()
+    
 
     model_spinner = Halo(
         text=f"Loading Whisper model: {args.whisper_model}...", 
