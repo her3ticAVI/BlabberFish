@@ -20,6 +20,8 @@ from halo import Halo
 SPINNER_TYPE = "pong"
 SPINNER_COLOR = "red"
 
+# --- Utility Functions ---
+
 def extract_zip(zip_path, extract_to):
     """Extract all mp3/mp4 files from a zip archive into a temporary directory."""
     with zipfile.ZipFile(zip_path, "r") as z:
@@ -143,8 +145,10 @@ def write_single_markdown(record, output_dir="."):
     """Write transcript as a single Markdown file based on the audio filename."""
     filename = record["file"]
     conversation = record["conversation"]
+    # Time formatted per user request: Month DD, YYYY, HH:MM AM/PM MDT, ensuring 'AM' is included when applicable.
     timestamp = datetime.now(timezone.utc).astimezone(datetime.now().astimezone().tzinfo).strftime("%B %d, %Y, %I:%M %p %Z")
     
+    # Determine the output path for the Markdown file
     out_path = os.path.join(
         output_dir, 
         f"{os.path.splitext(filename)[0]}.md",
@@ -165,6 +169,7 @@ def process_files(files, whisper_model, diarization_pipeline, out_path_base):
         print("No media files found.")
         return
 
+    # Determine the directory for Markdown output (using the directory of the original --out argument)
     md_output_dir = os.path.dirname(out_path_base) or "."
     
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -172,6 +177,7 @@ def process_files(files, whisper_model, diarization_pipeline, out_path_base):
             print(f"\nProcessing file: {os.path.basename(input_file)}")
             try:
                 
+                # Check file extension and convert to WAV if necessary
                 if Path(input_file).suffix.lower() in (".mp4", ".mp3"):
                     audio_file = convert_to_wav(input_file, tmpdir)
                 else:
@@ -187,6 +193,7 @@ def process_files(files, whisper_model, diarization_pipeline, out_path_base):
 
                 record = {"file": os.path.basename(input_file), "conversation": conversation}
                 
+                # Write the individual Markdown file
                 write_single_markdown(record, md_output_dir)
                 
                 print(f"File processing complete: {os.path.basename(input_file)}")
@@ -198,10 +205,12 @@ def process_files(files, whisper_model, diarization_pipeline, out_path_base):
 
     print(f"\nProcess complete. All transcripts saved as individual Markdown files in {md_output_dir}.")
 
+# --- Argument Parsing and Main Logic ---
 
 def parse_args():
     """Defines and parses command-line arguments, including the help banner."""
     
+    # --- Banner and Help Message ---
     banner = """
                                   ___                                       ___             ___           ___                       ___           ___     
      _____                       /\  \         _____         _____         /\__\           /\  \         /\__\                     /\__\         /\  \    
@@ -218,10 +227,11 @@ def parse_args():
 Transcribe Phone Call Audio
 By BHIS
     """
+    # -----------------------------
 
     parser = argparse.ArgumentParser(
         description=banner,
-        formatter_class=argparse.RawTextHelpFormatter
+        formatter_class=argparse.RawTextHelpFormatter  # Allows banner to display nicely
     )
     parser.add_argument("--zip", help="Path to a ZIP file containing MP3/MP4s")
     parser.add_argument("--mp3", help="Path to a single MP3 file")
@@ -243,7 +253,9 @@ By BHIS
 
     args = parser.parse_args()
 
+    # Pre-check for required arguments BEFORE model loading
     if not args.zip and not args.mp3 and not args.mp4:
+        # parser.error() prints the usage/banner and exits immediately.
         parser.error("Must provide one of: --zip, --mp3, or --mp4.")
     
     if not args.pyannote_token:
@@ -253,8 +265,11 @@ By BHIS
 
 
 def main():
+    # 1. Parse arguments first. If -h is used, the script exits here.
+    # If required arguments are missing, the script exits here with an error.
     args = parse_args()
     
+    # 2. Load models only if all necessary arguments are present
 
     model_spinner = Halo(
         text=f"Loading Whisper model: {args.whisper_model}...", 
@@ -282,6 +297,7 @@ def main():
         diarization_spinner.fail(f"Failed to load Pyannote pipeline. Check token/network. Details: {e}")
         return
 
+    # 3. Process files
     files = []
     if args.zip:
         zip_spinner = Halo(
@@ -292,6 +308,7 @@ def main():
         with tempfile.TemporaryDirectory() as tmpdir:
             files = extract_zip(args.zip, tmpdir)
             zip_spinner.succeed(f"Extracted {len(files)} media file(s).")
+            # Pass the base output path's directory information
             process_files(files, whisper_model, diarization_pipeline, args.out)
     elif args.mp3:
         files = [args.mp3]
