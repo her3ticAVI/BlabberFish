@@ -40,12 +40,12 @@
 ## Example Usage
 
 ```shell
-python diarize_tool.py \
+python BlabberFish.py \
     --mp3 meeting.mp3 \
     --whisper-model medium \
     --pyannote-token hf_xxxxxxxxxxxxxxxx
 
-python diarize_tool.py \
+python BlabberFish.py \
     --zip audio_batch.zip \
     --out batch_results.jsonl \
     --split-md \
