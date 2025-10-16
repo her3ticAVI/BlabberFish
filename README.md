@@ -38,8 +38,32 @@
 ## Example Usage
 
 ```shell
-{{ TODO }}
+python diarize_tool.py \
+    --mp3 meeting.mp3 \
+    --whisper-model medium \
+    --pyannote-token hf_xxxxxxxxxxxxxxxx
 
+python diarize_tool.py \
+    --zip audio_batch.zip \
+    --out batch_results.jsonl \
+    --split-md \
+    --pyannote-token hf_xxxxxxxxxxxxxxxx
+
+```
+
+BlabberFish Example Output
+
+```shell
+# meeting.mp3
+
+## Conversation 2025-10-15 23:57:21 UTC
+
+**SPEAKER_00**: Hello team, I'm glad everyone could make it today. Our first item is the budget review.
+
+**SPEAKER_01**: I've finalized the Q3 report. The marketing spend was 15% under budget.
+
+**SPEAKER_00**: Excellent news. And what about the development team's resource allocation for the next sprint?
+---
 ```
 
 ## Installing from Source (DEV Purposes)
