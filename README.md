@@ -1,5 +1,5 @@
 <div align="center">
-<a href="https://blackhillsinfosec.com"><img width="100%" src="https://github.com/her3ticAVI/BlabberFish/images/BlabberFishLogo.png" alt="BlabberFish Logo" /></a>
+<a href="https://blackhillsinfosec.com"><img width="100%" src="https://github.com/her3ticAVI/BlabberFish/blob/main/images/BlabberFishLogo.png" alt="BlabberFish Logo" /></a>
 <hr>
 
   <a href="https://github.com/blackhillsinfosec/WifiForge/actions"><img alt="GitHub Workflow Status" src="https://img.shields.io/github/actions/workflow/status/her3ticAVI/BlabberFish/.github%2Fworkflows%2Fpython-app.yml?style=flat-square"></a> 
