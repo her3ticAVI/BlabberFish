@@ -143,10 +143,10 @@ def write_single_markdown(record, output_dir="."):
     """Write transcript as a single Markdown file based on the audio filename."""
     filename = record["file"]
     conversation = record["conversation"]
-    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+    # Per user request: format the time as Month DD, YYYY, HH:MM AM/PM MDT, ensuring 'AM' is included when applicable.
+    timestamp = datetime.now(timezone.utc).astimezone(datetime.now().astimezone().tzinfo).strftime("%B %d, %Y, %I:%M %p %Z")
     
     # Determine the output path for the Markdown file
-    # We use the base directory of the specified output name (default is ".")
     out_path = os.path.join(
         output_dir, # Use the output directory derived from the original --out path
         f"{os.path.splitext(filename)[0]}.md",
@@ -205,8 +205,28 @@ def process_files(files, whisper_model, diarization_pipeline, out_path_base):
 
 
 def main():
+    # --- Banner and Help Message ---
+    banner = """
+                    ___                                                     ___           ___           ___                       ___           ___     
+     _____         /\  \                       _____         _____         /\__\         /\  \         /\__\                     /\__\         /\  \    
+    /::\  \       /::\  \                     /::\  \       /::\  \       /:/ _/_       /::\  \       /:/ _/_       ___         /:/ _/_        \:\  \   
+   /:/\:\  \     /:/\:\  \                   /:/\:\  \     /:/\:\  \     /:/ /\__\     /:/\:\__\     /:/ /\__\     /\__\       /:/ /\  \        \:\  \  
+  /:/ /::\__\   /:/ /::\  \   ___     ___   /:/ /::\__\   /:/ /::\__\   /:/ /:/ _/_   /:/ /:/  /    /:/ /:/  /    /:/__/      /:/ /::\  \   ___ /::\  \ 
+ /:/_/:/\:|__| /:/_/:/\:\__\ /\  \   /\__\ /:/_/:/\:|__| /:/_/:/\:|__| /:/_/:/ /\__\ /:/_/:/__/___ /:/_/:/  /    /::\  \     /:/_/:/\:\__\ /\  /:/\:\__\
+ \:\/:/ /:/  / \:\/:/  \/__/ \:\  \ /:/  / \:\/:/ /:/  / \:\/:/ /:/  / \:\/:/ /:/  / \:\/:::::/  / \:\/:/  /     \/\:\  \__  \:\/:/ /:/  / \:\/:/  \/__/
+  \::/_/:/  /   \::/__/       \:\  /:/  /   \::/_/:/  /   \::/_/:/  /   \::/_/:/  /   \::/~~/~~~~   \::/__/       ~~\:\/\__\  \::/ /:/  /   \::/__/     
+   \:\/:/  /     \:\  \        \:\/:/  /     \:\/:/  /     \:\/:/  /     \:\/:/  /     \:\~~\        \:\  \          \::/  /   \/_/:/  /     \:\  \     
+    \::/  /       \:\__\        \::/  /       \::/  /       \::/  /       \::/  /       \:\__\        \:\__\         /:/  /      /:/  /       \:\__\    
+     \/__/         \/__/         \/__/         \/__/         \/__/         \/__/         \/__/         \/__/         \/__/       \/__/         \/__/    
+
+Transcribe Phone Call Audio
+By BHIS
+    """
+    # -----------------------------
+
     parser = argparse.ArgumentParser(
-        description="Transcribe media files with Whisper and Pyannote diarization, outputting one Markdown file per media file."
+        description=banner,
+        formatter_class=argparse.RawTextHelpFormatter  # Allows banner to display nicely
     )
     parser.add_argument("--zip", help="Path to a ZIP file containing MP3/MP4s")
     parser.add_argument("--mp3", help="Path to a single MP3 file")
@@ -225,7 +245,6 @@ def main():
         "--pyannote-token", 
         help="HuggingFace access token for pyannote models. Required."
     )
-    # The --split-md argument is removed as splitting is now the default/only behavior
 
     args = parser.parse_args()
 
