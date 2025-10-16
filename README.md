@@ -30,10 +30,10 @@
 ## Navigation
 
 - [Installation Documentation](https://blabberfish.github.io/Installation)
-- [Walkthroughs](https://blabberfish.github.io/Lab-Walkthroughs/)
 - [Troubleshooting](https://blabberfish.github.io/Troubleshooting)
 - [Overview](https://blabberfish.github.io/Overview)
 - [Contributing](https://blabberfish.github.io/Development)
+- [Road Map](https://blabberfish.github.io/Roadmap)
 
 ## Example Usage
 
