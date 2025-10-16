@@ -42,7 +42,7 @@
 
 ```
 
-## Installing from Source (DEV)
+## Installing from Source (DEV Purposes)
 
 The following command should set up the environment required to use BlabberFish. Only Linux is supported at this time.
 
